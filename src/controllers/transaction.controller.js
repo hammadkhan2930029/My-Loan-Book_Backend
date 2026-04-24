@@ -30,6 +30,35 @@ const approveRepaymentRequest = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Repayment request approved successfully',
+    data: transaction,
+    transaction,
+  });
+});
+
+const confirmRepaymentRequest = asyncHandler(async (req, res) => {
+  const transaction = await transactionService.confirmRepaymentRequest(
+    req.user.id,
+    req.params.id,
+  );
+
+  res.status(200).json({
+    success: true,
+    message: 'Payment transaction confirmed successfully',
+    data: transaction,
+    transaction,
+  });
+});
+
+const rejectRepaymentRequest = asyncHandler(async (req, res) => {
+  const transaction = await transactionService.rejectRepaymentRequest(
+    req.user.id,
+    req.params.id,
+  );
+
+  res.status(200).json({
+    success: true,
+    message: 'Payment transaction rejected successfully',
+    data: transaction,
     transaction,
   });
 });
@@ -62,8 +91,10 @@ const getTransaction = asyncHandler(async (req, res) => {
 
 module.exports = {
   approveRepaymentRequest,
+  confirmRepaymentRequest,
   createRepaymentRequest,
   createTransaction,
   getTransaction,
   listTransactions,
+  rejectRepaymentRequest,
 };

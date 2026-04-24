@@ -1,9 +1,42 @@
+const mongoose = require('mongoose');
+
 const {Contact, Transaction} = require('../models');
+const notificationService = require('./notification.service');
 const ApiError = require('../utils/apiError');
+
+const FINAL_TRANSACTION_STATUSES = ['approved', 'confirmed'];
+const FINAL_OR_LEGACY_STATUS_FILTER = {
+  $or: [
+    {status: {$in: FINAL_TRANSACTION_STATUSES}},
+    {status: {$exists: false}},
+    {status: null},
+  ],
+};
+const LOAN_OR_LEGACY_CATEGORY_FILTER = {
+  $or: [{category: 'loan'}, {category: {$exists: false}}, {category: null}],
+};
 
 const invertType = type => (type === 'gave' ? 'took' : 'gave');
 
 const getIdString = value => (value?._id ? value._id.toString() : value.toString());
+
+const formatCurrencyValue = (amount, currency = 'PKR') => {
+  try {
+    return new Intl.NumberFormat('en-PK', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    }).format(Number(amount) || 0);
+  } catch {
+    return `${currency} ${Number(amount) || 0}`;
+  }
+};
+
+const ensureValidObjectId = (value, fieldName) => {
+  if (!mongoose.isValidObjectId(value)) {
+    throw new ApiError(`Invalid ${fieldName}`, 400);
+  }
+};
 
 const getViewerContactId = async (transaction, viewerId) => {
   const ownerId = getIdString(transaction.owner);
@@ -55,6 +88,7 @@ const getPublicTransaction = async (transaction, viewerId) => {
     recordedType: transaction.type,
     category: transaction.category || 'loan',
     status: transaction.status || 'approved',
+    loanId: transaction.parentTransaction ? getIdString(transaction.parentTransaction) : null,
     parentTransactionId: transaction.parentTransaction
       ? getIdString(transaction.parentTransaction)
       : null,
@@ -84,6 +118,8 @@ const populateTransaction = query =>
     });
 
 const ensureOwnedContact = async (ownerId, contactId) => {
+  ensureValidObjectId(contactId, 'contact identifier');
+
   const contact = await Contact.findOne({
     _id: contactId,
     owner: ownerId,
@@ -97,6 +133,8 @@ const ensureOwnedContact = async (ownerId, contactId) => {
 };
 
 const ensureTransactionParticipant = async (viewerId, transactionId) => {
+  ensureValidObjectId(transactionId, 'transaction identifier');
+
   const transaction = await populateTransaction(
     Transaction.findOne({
       _id: transactionId,
@@ -109,6 +147,80 @@ const ensureTransactionParticipant = async (viewerId, transactionId) => {
   }
 
   return transaction;
+};
+
+const ensureLoanBelongsToUsers = async ({loanId, borrowerId, lenderId}) => {
+  ensureValidObjectId(loanId, 'loan identifier');
+
+  const loan = await Transaction.findOne({
+    _id: loanId,
+    $and: [
+      LOAN_OR_LEGACY_CATEGORY_FILTER,
+      FINAL_OR_LEGACY_STATUS_FILTER,
+      {
+        $or: [
+          {owner: borrowerId, contactUser: lenderId},
+          {owner: lenderId, contactUser: borrowerId},
+        ],
+      },
+    ],
+  }).select('_id owner contactUser amount currency category type status');
+
+  if (!loan) {
+    throw new ApiError('Loan not found for this borrower and lender', 404);
+  }
+
+  return loan;
+};
+
+const buildViewerPairSummary = async ({viewerId, counterpartyUserId}) => {
+  // We compute the pair ledger from the current viewer's perspective to validate
+  // whether this user is actually the borrower and still has an outstanding balance.
+  const pairTransactions = await Transaction.find({
+    $and: [
+      FINAL_OR_LEGACY_STATUS_FILTER,
+      {
+        $or: [
+          {owner: viewerId, contactUser: counterpartyUserId},
+          {owner: counterpartyUserId, contactUser: viewerId},
+        ],
+      },
+    ],
+  }).select('owner contactUser type amount category status');
+
+  return pairTransactions.reduce(
+    (summary, transaction) => {
+      const ownerId = getIdString(transaction.owner);
+      const viewerType =
+        ownerId === viewerId.toString() ? transaction.type : invertType(transaction.type);
+      const amount = Number(transaction.amount) || 0;
+
+      if (transaction.category === 'repayment') {
+        if (viewerType === 'gave') {
+          summary.repaid += amount;
+        } else {
+          summary.collected += amount;
+        }
+      } else if (viewerType === 'took') {
+        summary.took += amount;
+      } else {
+        summary.gave += amount;
+      }
+
+      summary.remainingToPay = Math.max(summary.took - summary.repaid, 0);
+      summary.remainingToReceive = Math.max(summary.gave - summary.collected, 0);
+
+      return summary;
+    },
+    {
+      gave: 0,
+      took: 0,
+      repaid: 0,
+      collected: 0,
+      remainingToPay: 0,
+      remainingToReceive: 0,
+    },
+  );
 };
 
 const createTransaction = async (ownerId, payload) => {
@@ -146,17 +258,44 @@ const createTransaction = async (ownerId, payload) => {
 
 const createRepaymentRequest = async (ownerId, payload) => {
   const contact = await ensureOwnedContact(ownerId, payload.contactId);
+  const lenderId = contact.contactUser;
+  const ledgerSummary = await buildViewerPairSummary({
+    viewerId: ownerId,
+    counterpartyUserId: lenderId,
+  });
+
+  if (ledgerSummary.remainingToPay <= 0) {
+    throw new ApiError(
+      'Only a borrower with an outstanding balance can submit a payment request',
+      400,
+    );
+  }
+
+  if (payload.amount > ledgerSummary.remainingToPay) {
+    throw new ApiError('Payment amount cannot exceed the outstanding balance', 400);
+  }
+
+  const loanId = payload.parentTransaction || payload.loanId || null;
+
+  if (loanId) {
+    // When a repayment is tied to a specific loan, make sure both users belong to it.
+    await ensureLoanBelongsToUsers({
+      loanId,
+      borrowerId: ownerId,
+      lenderId,
+    });
+  }
 
   const repayment = await Transaction.create({
     owner: ownerId,
     contact: contact._id,
-    contactUser: contact.contactUser,
+    contactUser: lenderId,
     type: 'gave',
     amount: payload.amount,
     currency: payload.currency || 'PKR',
     category: 'repayment',
     status: 'pending',
-    parentTransaction: payload.parentTransaction || null,
+    parentTransaction: loanId,
     transactionDate: payload.transactionDate || new Date(),
     note: payload.note || '',
     attachment: payload.attachment || '',
@@ -171,25 +310,38 @@ const createRepaymentRequest = async (ownerId, payload) => {
     select: 'fullName profilePhoto',
   });
 
+  await notificationService.createNotification({
+    userId: lenderId,
+    senderId: ownerId,
+    loanId,
+    transactionId: repayment._id,
+    title: 'Payment submitted',
+    message: `${repayment.owner.fullName} has submitted a payment of ${formatCurrencyValue(
+      repayment.amount,
+      repayment.currency,
+    )} for your loan. Please review and confirm.`,
+    type: 'payment_submitted',
+  });
+
   return getPublicTransaction(repayment, ownerId);
 };
 
-const approveRepaymentRequest = async (ownerId, transactionId) => {
+const confirmRepaymentRequest = async (ownerId, transactionId) => {
   const transaction = await ensureTransactionParticipant(ownerId, transactionId);
 
   if (transaction.category !== 'repayment') {
-    throw new ApiError('Only repayment requests can be approved', 400);
+    throw new ApiError('Only repayment transactions can be confirmed', 400);
   }
 
   if (transaction.status !== 'pending') {
-    throw new ApiError('Repayment request is already processed', 400);
+    throw new ApiError('Payment transaction has already been processed', 400);
   }
 
   if (getIdString(transaction.contactUser) !== ownerId.toString()) {
-    throw new ApiError('Only the receiving user can approve this repayment', 403);
+    throw new ApiError('Only the lender can confirm this payment transaction', 403);
   }
 
-  transaction.status = 'approved';
+  transaction.status = 'confirmed';
   transaction.approvedAt = new Date();
   await transaction.save();
   await transaction.populate({
@@ -201,8 +353,67 @@ const approveRepaymentRequest = async (ownerId, transactionId) => {
     select: 'fullName profilePhoto',
   });
 
+  await notificationService.createNotification({
+    userId: transaction.owner._id,
+    senderId: ownerId,
+    loanId: transaction.parentTransaction || null,
+    transactionId: transaction._id,
+    title: 'Payment confirmed',
+    message: `${transaction.contactUser.fullName} has confirmed your payment of ${formatCurrencyValue(
+      transaction.amount,
+      transaction.currency,
+    )}.`,
+    type: 'payment_confirmed',
+  });
+
   return getPublicTransaction(transaction, ownerId);
 };
+
+const rejectRepaymentRequest = async (ownerId, transactionId) => {
+  const transaction = await ensureTransactionParticipant(ownerId, transactionId);
+
+  if (transaction.category !== 'repayment') {
+    throw new ApiError('Only repayment transactions can be rejected', 400);
+  }
+
+  if (transaction.status !== 'pending') {
+    throw new ApiError('Payment transaction has already been processed', 400);
+  }
+
+  if (getIdString(transaction.contactUser) !== ownerId.toString()) {
+    throw new ApiError('Only the lender can reject this payment transaction', 403);
+  }
+
+  transaction.status = 'rejected';
+  transaction.approvedAt = null;
+  await transaction.save();
+  await transaction.populate({
+    path: 'contactUser',
+    select: 'fullName profilePhoto',
+  });
+  await transaction.populate({
+    path: 'owner',
+    select: 'fullName profilePhoto',
+  });
+
+  await notificationService.createNotification({
+    userId: transaction.owner._id,
+    senderId: ownerId,
+    loanId: transaction.parentTransaction || null,
+    transactionId: transaction._id,
+    title: 'Payment rejected',
+    message: `${transaction.contactUser.fullName} has rejected your payment of ${formatCurrencyValue(
+      transaction.amount,
+      transaction.currency,
+    )}. Please review and submit again.`,
+    type: 'payment_rejected',
+  });
+
+  return getPublicTransaction(transaction, ownerId);
+};
+
+const approveRepaymentRequest = async (ownerId, transactionId) =>
+  confirmRepaymentRequest(ownerId, transactionId);
 
 const listTransactions = async (ownerId, filters = {}) => {
   const query = {
@@ -231,6 +442,7 @@ const listTransactions = async (ownerId, filters = {}) => {
   );
 
   return publicTransactions
+    .filter(transaction => transaction.status !== 'rejected')
     .filter(transaction => {
       if (filters.type && ['gave', 'took'].includes(filters.type)) {
         return transaction.type === filters.type;
@@ -241,6 +453,8 @@ const listTransactions = async (ownerId, filters = {}) => {
 };
 
 const getTransactionById = async (ownerId, transactionId) => {
+  ensureValidObjectId(transactionId, 'transaction identifier');
+
   const transaction = await populateTransaction(
     Transaction.findOne({
       _id: transactionId,
@@ -257,8 +471,10 @@ const getTransactionById = async (ownerId, transactionId) => {
 
 module.exports = {
   approveRepaymentRequest,
+  confirmRepaymentRequest,
   createRepaymentRequest,
   createTransaction,
   getTransactionById,
   listTransactions,
+  rejectRepaymentRequest,
 };

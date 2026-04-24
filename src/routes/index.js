@@ -3,6 +3,8 @@ const express = require('express');
 const authRoutes = require('./auth.routes');
 const contactRoutes = require('./contact.routes');
 const dashboardRoutes = require('./dashboard.routes');
+const legalContentRoutes = require('./legal-content.routes');
+const notificationRoutes = require('./notification.routes');
 const reportsRoutes = require('./reports.routes');
 const transactionRoutes = require('./transaction.routes');
 
@@ -18,6 +20,8 @@ router.get('/health', (req, res) => {
 router.use('/auth', authRoutes);
 router.use('/contacts', contactRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/legal', legalContentRoutes);
+router.use('/notifications', notificationRoutes);
 router.use('/reports', reportsRoutes);
 router.use('/transactions', transactionRoutes);
 

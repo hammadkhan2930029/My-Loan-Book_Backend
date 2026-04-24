@@ -45,7 +45,7 @@ const transactionSchema = new mongoose.Schema(
     status: {
       type: String,
       required: [true, 'Transaction status is required'],
-      enum: ['approved', 'pending'],
+      enum: ['approved', 'confirmed', 'pending', 'rejected'],
       default: 'approved',
     },
     parentTransaction: {

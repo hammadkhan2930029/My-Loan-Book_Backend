@@ -1,5 +1,6 @@
 const attachmentPattern =
   /^(https?:\/\/\S+|data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+)$/;
+const objectIdPattern = /^[a-fA-F0-9]{24}$/;
 
 const cleanString = value => (typeof value === 'string' ? value.trim() : '');
 
@@ -17,6 +18,7 @@ const createTransactionValidator = body => {
   const currency = cleanString(body.currency || body.currencyCode).toUpperCase();
   const transactionDate = cleanString(body.transactionDate || body.date);
   const dueDate = cleanString(body.dueDate || body.returnDueDate);
+  const loanId = cleanString(body.loanId || body.parentTransaction);
   const monthlyPaymentDayRaw = cleanString(
     body.monthlyPaymentDay || body.installmentDay || body.monthlyReturnDate,
   );
@@ -97,6 +99,18 @@ const createTransactionValidator = body => {
     }
   }
 
+  if (loanId) {
+    if (!objectIdPattern.test(loanId)) {
+      errors.push({
+        field: 'loanId',
+        message: 'Enter a valid loan identifier',
+      });
+    } else {
+      value.loanId = loanId;
+      value.parentTransaction = loanId;
+    }
+  }
+
   if (value.transactionDate && value.dueDate && value.dueDate < value.transactionDate) {
     errors.push({
       field: 'dueDate',
@@ -152,6 +166,7 @@ const createRepaymentRequestValidator = body => {
   });
 
   delete result.value.dueDate;
+  delete result.value.loanId;
   delete result.value.monthlyPaymentDay;
   result.value.type = 'gave';
   result.value.category = 'repayment';

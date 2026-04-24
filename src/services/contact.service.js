@@ -1,4 +1,5 @@
 const {Contact, User} = require('../models');
+const notificationService = require('./notification.service');
 const ApiError = require('../utils/apiError');
 
 const getPublicContact = contact => {
@@ -48,6 +49,12 @@ const getContactById = async (ownerId, contactId) => {
 };
 
 const addContactByRegCode = async (ownerId, regCode) => {
+  const ownerUser = await User.findById(ownerId).select('fullName');
+
+  if (!ownerUser) {
+    throw new ApiError('Authenticated user not found', 401);
+  }
+
   const contactUser = await User.findOne({reg_code: regCode});
 
   if (!contactUser) {
@@ -87,6 +94,22 @@ const addContactByRegCode = async (ownerId, regCode) => {
   await contact.populate({
     path: 'contactUser',
     select: 'userId fullName email phone reg_code profilePhoto',
+  });
+
+  await notificationService.createNotification({
+    userId: ownerId,
+    senderId: contactUser._id,
+    title: 'Contact added successfully',
+    message: `${contactUser.fullName} is now added to your contacts and ready for your ledger.`,
+    type: 'contact_added',
+  });
+
+  await notificationService.createNotification({
+    userId: contactUser._id,
+    senderId: ownerId,
+    title: 'You were added as a contact',
+    message: `${ownerUser.fullName} has added you to their contact list.`,
+    type: 'contact_added',
   });
 
   return getPublicContact(contact);
