@@ -31,12 +31,25 @@ const userSchema = new mongoose.Schema(
       minlength: [8, 'Password must be at least 8 characters'],
       select: false,
     },
+    userId: {
+      type: String,
+      required: [true, 'User ID is required'],
+      unique: true,
+      trim: true,
+      match: [/^[0-9]{2}$/, 'User ID must be a 2 digit number'],
+    },
     reg_code: {
       type: String,
       trim: true,
       uppercase: true,
       match: [/^[A-Z0-9]{6}$/, 'Registration code must be 6 uppercase letters or numbers'],
       default: null,
+    },
+    profilePhoto: {
+      type: String,
+      trim: true,
+      maxlength: [2000000, 'Profile photo is too large'],
+      default: '',
     },
     resetPasswordToken: {
       type: String,
@@ -73,6 +86,7 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({email: 1}, {unique: true});
 userSchema.index({phone: 1}, {unique: true});
+userSchema.index({userId: 1}, {unique: true});
 
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password')) {

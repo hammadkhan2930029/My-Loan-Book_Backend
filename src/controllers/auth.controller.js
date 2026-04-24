@@ -56,10 +56,33 @@ const getMe = asyncHandler(async (req, res) => {
   });
 });
 
+const updateMe = asyncHandler(async (req, res) => {
+  const user = await authService.updateCurrentUser(req.user.id, req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Profile updated successfully',
+    user,
+  });
+});
+
+const changePassword = asyncHandler(async (req, res) => {
+  const result = await authService.changeCurrentUserPassword(req.user.id, req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Password changed successfully',
+    token: result.token,
+    user: result.user,
+  });
+});
+
 module.exports = {
   register,
   login,
   forgotPassword,
   resetPassword,
   getMe,
+  updateMe,
+  changePassword,
 };

@@ -4,10 +4,12 @@ const {authController} = require('../controllers');
 const {protect} = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
 const {
+  changePasswordValidator,
   forgotPasswordValidator,
   loginValidator,
   registerValidator,
   resetPasswordValidator,
+  updateProfileValidator,
 } = require('../validators');
 
 const router = express.Router();
@@ -25,5 +27,17 @@ router.post(
   authController.resetPassword,
 );
 router.get('/me', protect, authController.getMe);
+router.patch(
+  '/me',
+  protect,
+  validate(updateProfileValidator),
+  authController.updateMe,
+);
+router.patch(
+  '/change-password',
+  protect,
+  validate(changePasswordValidator),
+  authController.changePassword,
+);
 
 module.exports = router;

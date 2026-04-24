@@ -30,6 +30,7 @@ Success response:
   "token": "JWT_TOKEN_HERE",
   "user": {
     "id": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
     "fullName": "Sara Khan",
     "email": "sara.khan@example.com",
     "phone": "+923001234567",
@@ -63,6 +64,7 @@ Success response:
   "reg_code": "A7K2P9",
   "user": {
     "id": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
     "fullName": "Sara Khan",
     "email": "sara.khan@example.com",
     "phone": "+923001234567",
@@ -125,6 +127,7 @@ Success response:
   "token": "JWT_TOKEN_HERE",
   "user": {
     "id": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
     "fullName": "Sara Khan",
     "email": "sara.khan@example.com",
     "phone": "+923001234567",
@@ -153,12 +156,303 @@ Success response:
   "message": "Current user profile fetched",
   "user": {
     "id": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
     "fullName": "Sara Khan",
     "email": "sara.khan@example.com",
     "phone": "+923001234567",
     "reg_code": "A7K2P9",
     "createdAt": "2026-04-22T19:20:00.000Z",
     "updatedAt": "2026-04-22T19:30:00.000Z"
+  }
+}
+```
+
+## Update Current User
+
+`PATCH /me`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Request:
+
+```json
+{
+  "fullName": "Sara Ahmed",
+  "email": "sara.ahmed@example.com",
+  "phone": "+923001234568",
+  "profilePhoto": "https://example.com/sara.jpg"
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Profile updated successfully",
+  "user": {
+    "id": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
+    "fullName": "Sara Ahmed",
+    "email": "sara.ahmed@example.com",
+    "phone": "+923001234568",
+    "reg_code": "A7K2P9",
+    "profilePhoto": "https://example.com/sara.jpg",
+    "createdAt": "2026-04-22T19:20:00.000Z",
+    "updatedAt": "2026-04-22T19:40:00.000Z"
+  }
+}
+```
+
+## Change Password
+
+`PATCH /change-password`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Request:
+
+```json
+{
+  "currentPassword": "password123",
+  "password": "newpassword123",
+  "confirmPassword": "newpassword123"
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Password changed successfully",
+  "token": "NEW_JWT_TOKEN_HERE",
+  "user": {
+    "id": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
+    "fullName": "Sara Ahmed",
+    "email": "sara.ahmed@example.com",
+    "phone": "+923001234568",
+    "reg_code": "A7K2P9",
+    "profilePhoto": "https://example.com/sara.jpg",
+    "createdAt": "2026-04-22T19:20:00.000Z",
+    "updatedAt": "2026-04-22T19:45:00.000Z"
+  }
+}
+```
+
+## Contacts: List Contacts
+
+`GET /api/contacts`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Contacts fetched successfully",
+  "contacts": [
+    {
+      "id": "6628f3f8b1c2a4d5e6f78911",
+      "contactUserId": "6628f3f8b1c2a4d5e6f78910",
+      "userId": "47",
+      "fullName": "Sara Ahmed",
+      "email": "sara.ahmed@example.com",
+      "phone": "+923001234568",
+      "reg_code": "A7K2P9",
+      "profilePhoto": "https://example.com/sara.jpg",
+      "createdAt": "2026-04-22T19:50:00.000Z",
+      "updatedAt": "2026-04-22T19:50:00.000Z"
+    }
+  ]
+}
+```
+
+## Contacts: Add Contact By Reg Code
+
+`POST /api/contacts`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Request:
+
+```json
+{
+  "reg_code": "A7K2P9"
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Contact added successfully",
+  "contact": {
+    "id": "6628f3f8b1c2a4d5e6f78911",
+    "contactUserId": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
+    "fullName": "Sara Ahmed",
+    "email": "sara.ahmed@example.com",
+    "phone": "+923001234568",
+    "reg_code": "A7K2P9",
+    "profilePhoto": "https://example.com/sara.jpg",
+    "createdAt": "2026-04-22T19:50:00.000Z",
+    "updatedAt": "2026-04-22T19:50:00.000Z"
+  }
+}
+```
+
+## Contacts: Get Contact Detail
+
+`GET /api/contacts/:id`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Contact fetched successfully",
+  "contact": {
+    "id": "6628f3f8b1c2a4d5e6f78911",
+    "contactUserId": "6628f3f8b1c2a4d5e6f78910",
+    "userId": "47",
+    "fullName": "Sara Ahmed",
+    "email": "sara.ahmed@example.com",
+    "phone": "+923001234568",
+    "reg_code": "A7K2P9",
+    "profilePhoto": "https://example.com/sara.jpg",
+    "createdAt": "2026-04-22T19:50:00.000Z",
+    "updatedAt": "2026-04-22T19:50:00.000Z"
+  }
+}
+```
+
+## Transactions: Create Transaction
+
+`POST /api/transactions`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Request:
+
+```json
+{
+  "contactId": "6628f3f8b1c2a4d5e6f78911",
+  "type": "gave",
+  "amount": 5000,
+  "transactionDate": "2026-04-23T12:00:00.000Z",
+  "note": "Loan for groceries",
+  "attachment": ""
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Transaction created successfully",
+  "transaction": {
+    "id": "6628f3f8b1c2a4d5e6f78912",
+    "contactId": "6628f3f8b1c2a4d5e6f78911",
+    "contactUserId": "6628f3f8b1c2a4d5e6f78910",
+    "contactName": "Sara Ahmed",
+    "contactPhoto": "https://example.com/sara.jpg",
+    "type": "gave",
+    "amount": 5000,
+    "transactionDate": "2026-04-23T12:00:00.000Z",
+    "note": "Loan for groceries",
+    "attachment": "",
+    "createdAt": "2026-04-23T12:01:00.000Z",
+    "updatedAt": "2026-04-23T12:01:00.000Z"
+  }
+}
+```
+
+## Transactions: List Transactions
+
+`GET /api/transactions`
+
+Optional query:
+
+```text
+?contactId=6628f3f8b1c2a4d5e6f78911&type=gave
+```
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Transactions fetched successfully",
+  "transactions": []
+}
+```
+
+## Transactions: Get Transaction Detail
+
+`GET /api/transactions/:id`
+
+Headers:
+
+```text
+Authorization: Bearer JWT_TOKEN_HERE
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "Transaction fetched successfully",
+  "transaction": {
+    "id": "6628f3f8b1c2a4d5e6f78912",
+    "contactId": "6628f3f8b1c2a4d5e6f78911",
+    "contactUserId": "6628f3f8b1c2a4d5e6f78910",
+    "contactName": "Sara Ahmed",
+    "contactPhoto": "https://example.com/sara.jpg",
+    "type": "gave",
+    "amount": 5000,
+    "transactionDate": "2026-04-23T12:00:00.000Z",
+    "note": "Loan for groceries",
+    "attachment": "",
+    "createdAt": "2026-04-23T12:01:00.000Z",
+    "updatedAt": "2026-04-23T12:01:00.000Z"
   }
 }
 ```

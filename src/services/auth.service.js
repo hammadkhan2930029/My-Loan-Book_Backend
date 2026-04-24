@@ -4,16 +4,19 @@ const {User} = require('../models');
 const ApiError = require('../utils/apiError');
 const generateRegCode = require('../utils/generateRegCode');
 const generateResetToken = require('../utils/generateResetToken');
+const generateUserId = require('../utils/generateUserId');
 const {generateJwt} = require('./token.service');
 
 const resetTokenExpiryMinutes = 15;
 
 const getPublicUser = user => ({
   id: user._id.toString(),
+  userId: user.userId,
   fullName: user.fullName,
   email: user.email,
   phone: user.phone,
   reg_code: user.reg_code,
+  profilePhoto: user.profilePhoto || '',
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -31,6 +34,19 @@ const createUniqueRegCode = async () => {
   throw new ApiError('Could not generate unique registration code', 500);
 };
 
+const createUniqueUserId = async () => {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const userId = generateUserId();
+    const exists = await User.exists({userId});
+
+    if (!exists) {
+      return userId;
+    }
+  }
+
+  throw new ApiError('Could not generate unique 2 digit user ID', 500);
+};
+
 const registerUser = async payload => {
   const existingUser = await User.findOne({
     $or: [{email: payload.email}, {phone: payload.phone}],
@@ -46,6 +62,7 @@ const registerUser = async payload => {
 
   const user = await User.create({
     ...payload,
+    userId: await createUniqueUserId(),
     reg_code: await createUniqueRegCode(),
   });
   const token = generateJwt(user._id);
@@ -138,11 +155,73 @@ const getCurrentUser = async userId => {
   return getPublicUser(user);
 };
 
+const updateCurrentUser = async (userId, payload) => {
+  const conflictingUser = await User.findOne({
+    _id: {$ne: userId},
+    $or: [{email: payload.email}, {phone: payload.phone}],
+  });
+
+  if (conflictingUser) {
+    if (conflictingUser.email === payload.email) {
+      throw new ApiError('Email is already registered', 409);
+    }
+
+    throw new ApiError('Phone number is already registered', 409);
+  }
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    {
+      fullName: payload.fullName,
+      email: payload.email,
+      phone: payload.phone,
+      profilePhoto: payload.profilePhoto || '',
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+
+  if (!user) {
+    throw new ApiError('User not found', 404);
+  }
+
+  return getPublicUser(user);
+};
+
+const changeCurrentUserPassword = async (userId, {currentPassword, password}) => {
+  const user = await User.findById(userId).select('+password');
+
+  if (!user) {
+    throw new ApiError('User not found', 404);
+  }
+
+  const passwordMatches = await user.comparePassword(currentPassword);
+
+  if (!passwordMatches) {
+    throw new ApiError('Current password is incorrect', 401);
+  }
+
+  user.password = password;
+  await user.save();
+
+  const token = generateJwt(user._id);
+
+  return {
+    token,
+    user: getPublicUser(user),
+  };
+};
+
 module.exports = {
   registerUser,
   loginUser,
   generateJwt,
+  createUniqueUserId,
   createPasswordResetToken,
   resetPassword,
   getCurrentUser,
+  updateCurrentUser,
+  changeCurrentUserPassword,
 };
