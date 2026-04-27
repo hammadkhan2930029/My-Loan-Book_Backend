@@ -19,80 +19,153 @@ const formatDate = value =>
     year: 'numeric',
   }).format(new Date(value));
 
-const getReportsData = async (ownerId, filters = {}) => {
-  const month = Number(filters.month) || new Date().getMonth() + 1;
-  const year = Number(filters.year) || new Date().getFullYear();
-  const transactions = await transactionService.listTransactions(ownerId);
-  const reportTransactions = transactions.filter(transaction => {
-    if (transaction.status === 'pending') {
-      return false;
-    }
+const getBreakdownKey = transaction => {
+  if (transaction.category === 'repayment') {
+    return transaction.type === 'took' ? 'returned_to_me' : 'repaid_by_me';
+  }
 
-    const transactionDate = new Date(transaction.transactionDate);
+  return transaction.type === 'gave' ? 'loans_given' : 'loans_taken';
+};
 
-    return (
-      transactionDate.getMonth() + 1 === month &&
-      transactionDate.getFullYear() === year
-    );
-  });
+const getBreakdownLabel = key => {
+  const labels = {
+    loans_given: 'Loan Given',
+    returned_to_me: 'Returned To Me',
+    loans_taken: 'Loan Taken',
+    repaid_by_me: 'Repaid By Me',
+  };
 
-  const gave = reportTransactions.reduce((total, transaction) => {
-    if (transaction.category === 'loan' && transaction.type === 'gave') {
-      return total + (Number(transaction.amount) || 0);
-    }
+  return labels[key] || 'Transaction';
+};
 
-    return total;
-  }, 0);
+const buildHistoryItem = transaction => {
+  const breakdownKey = getBreakdownKey(transaction);
+  const isOutgoing = breakdownKey === 'loans_given' || breakdownKey === 'repaid_by_me';
 
-  const took = reportTransactions.reduce((total, transaction) => {
-    if (
-      (transaction.category === 'loan' && transaction.type === 'took') ||
-      (transaction.category === 'repayment' && transaction.type === 'took')
-    ) {
-      return total + (Number(transaction.amount) || 0);
-    }
-
-    return total;
-  }, 0);
-
-  const currency = reportTransactions[0]?.currency || 'PKR';
-  const total = gave + took;
-  const history = reportTransactions.slice(0, 8).map(transaction => ({
-    amount: transaction.type === 'gave'
-      ? `-${formatCurrencyValue(transaction.amount, transaction.currency)}`
-      : `+${formatCurrencyValue(transaction.amount, transaction.currency)}`,
+  return {
+    amount: `${isOutgoing ? '-' : '+'}${formatCurrencyValue(transaction.amount, transaction.currency)}`,
+    breakdownKey,
     id: transaction.id,
-    subtitle: `${
-      transaction.category === 'repayment' ? 'Repayment' : transaction.type === 'gave' ? 'You gave money' : 'You took money'
-    } - ${formatDate(transaction.transactionDate)}`,
+    subtitle: `${getBreakdownLabel(breakdownKey)} - ${formatDate(transaction.transactionDate)}`,
     title:
       transaction.category === 'repayment'
         ? `${transaction.counterpartyName} repayment`
         : transaction.counterpartyName,
-  }));
+  };
+};
+
+const createEmptyHistoryBuckets = () => ({
+  all: [],
+  loans_given: [],
+  returned_to_me: [],
+  loans_taken: [],
+  repaid_by_me: [],
+});
+
+const getReportsData = async (ownerId, filters = {}) => {
+  const month = filters.month ? Number(filters.month) : null;
+  const year = Number(filters.year) || new Date().getFullYear();
+  const transactions = await transactionService.listTransactions(ownerId);
+
+  const finalizedTransactions = transactions.filter(
+    transaction => transaction.status === 'approved' || transaction.status === 'confirmed',
+  );
+
+  const reportTransactions = finalizedTransactions.filter(transaction => {
+    const transactionDate = new Date(transaction.transactionDate);
+    const sameYear = transactionDate.getFullYear() === year;
+
+    if (!sameYear) {
+      return false;
+    }
+
+    if (!month) {
+      return true;
+    }
+
+    return transactionDate.getMonth() + 1 === month;
+  });
+
+  const currency = reportTransactions[0]?.currency || finalizedTransactions[0]?.currency || 'PKR';
+  const history = createEmptyHistoryBuckets();
+
+  const totals = reportTransactions.reduce(
+    (summary, transaction) => {
+      const breakdownKey = getBreakdownKey(transaction);
+      const amount = Number(transaction.amount) || 0;
+      const historyItem = buildHistoryItem(transaction);
+
+      summary.totalEntries += 1;
+      summary.totalFlow += amount;
+      history.all.push(historyItem);
+      history[breakdownKey].push(historyItem);
+
+      if (breakdownKey === 'loans_given') {
+        summary.rawLoansGiven += amount;
+        summary.loanGivenCount += 1;
+      } else if (breakdownKey === 'returned_to_me') {
+        summary.rawReturnedToMe += amount;
+        summary.returnedToMeCount += 1;
+      } else if (breakdownKey === 'loans_taken') {
+        summary.rawLoansTaken += amount;
+        summary.loansTakenCount += 1;
+      } else if (breakdownKey === 'repaid_by_me') {
+        summary.rawRepaidByMe += amount;
+        summary.repaidByMeCount += 1;
+      }
+
+      return summary;
+    },
+    {
+      loanGivenCount: 0,
+      loansTakenCount: 0,
+      rawLoansGiven: 0,
+      rawLoansTaken: 0,
+      rawRepaidByMe: 0,
+      rawReturnedToMe: 0,
+      repaidByMeCount: 0,
+      returnedToMeCount: 0,
+      totalEntries: 0,
+      totalFlow: 0,
+    },
+  );
+
+  const rawOutstandingToReceive = Math.max(totals.rawLoansGiven - totals.rawReturnedToMe, 0);
+  const rawOutstandingToPay = Math.max(totals.rawLoansTaken - totals.rawRepaidByMe, 0);
+  const rawNetBalance = rawOutstandingToReceive - rawOutstandingToPay;
 
   return {
     history,
     summary: {
       currency,
-      gave: formatCurrencyValue(gave, currency),
-      gaveCount: reportTransactions.filter(
-        transaction => transaction.category === 'loan' && transaction.type === 'gave',
-      ).length,
-      rawGave: gave,
-      rawTook: took,
-      titleMonth: new Intl.DateTimeFormat('en-US', {month: 'short'}).format(
-        new Date(year, month - 1, 1),
-      ),
-      took: formatCurrencyValue(took, currency),
-      tookCount: reportTransactions.filter(
-        transaction =>
-          (transaction.category === 'loan' && transaction.type === 'took') ||
-          (transaction.category === 'repayment' && transaction.type === 'took'),
-      ).length,
-      total,
-      totalDisplay: formatCurrencyValue(total, currency),
-      totalEntries: history.length,
+      loanGivenCount: totals.loanGivenCount,
+      loansGiven: formatCurrencyValue(totals.rawLoansGiven, currency),
+      loansTaken: formatCurrencyValue(totals.rawLoansTaken, currency),
+      loansTakenCount: totals.loansTakenCount,
+      month,
+      netBalance: formatCurrencyValue(rawNetBalance, currency),
+      outstandingToPay: formatCurrencyValue(rawOutstandingToPay, currency),
+      outstandingToReceive: formatCurrencyValue(rawOutstandingToReceive, currency),
+      periodLabel: month
+        ? `${new Intl.DateTimeFormat('en-US', {month: 'short'}).format(new Date(year, month - 1, 1))} ${year}`
+        : `${year}`,
+      rawLoansGiven: totals.rawLoansGiven,
+      rawLoansTaken: totals.rawLoansTaken,
+      rawNetBalance,
+      rawOutstandingToPay,
+      rawOutstandingToReceive,
+      rawRepaidByMe: totals.rawRepaidByMe,
+      rawReturnedToMe: totals.rawReturnedToMe,
+      repaidByMe: formatCurrencyValue(totals.rawRepaidByMe, currency),
+      repaidByMeCount: totals.repaidByMeCount,
+      returnedToMe: formatCurrencyValue(totals.rawReturnedToMe, currency),
+      returnedToMeCount: totals.returnedToMeCount,
+      titleMonth: month
+        ? new Intl.DateTimeFormat('en-US', {month: 'short'}).format(new Date(year, month - 1, 1))
+        : 'All',
+      totalDisplay: formatCurrencyValue(totals.totalFlow, currency),
+      totalEntries: totals.totalEntries,
+      totalFlow: totals.totalFlow,
       year,
     },
   };
