@@ -78,7 +78,6 @@ const populateNotification = query =>
     });
 
 const createNotification = async payload => {
-  // Notifications are stored against the receiver so each user can only read their own feed.
   const notification = await Notification.create({
     userId: payload.userId,
     senderId: payload.senderId,

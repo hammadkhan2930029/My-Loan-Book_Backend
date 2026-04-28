@@ -17,7 +17,6 @@ const LOAN_OR_LEGACY_CATEGORY_FILTER = {
 };
 
 const invertType = type => (type === 'gave' ? 'took' : 'gave');
-
 const getIdString = value => (value?._id ? value._id.toString() : value.toString());
 
 const formatCurrencyValue = (amount, currency = 'PKR') => {
@@ -151,7 +150,6 @@ const ensureTransactionParticipant = async (viewerId, transactionId) => {
 
 const ensureLoanBelongsToUsers = async ({loanId, borrowerId, lenderId}) => {
   ensureValidObjectId(loanId, 'loan identifier');
-
   const loan = await Transaction.findOne({
     _id: loanId,
     $and: [
@@ -174,8 +172,6 @@ const ensureLoanBelongsToUsers = async ({loanId, borrowerId, lenderId}) => {
 };
 
 const buildViewerPairSummary = async ({viewerId, counterpartyUserId}) => {
-  // We compute the pair ledger from the current viewer's perspective to validate
-  // whether this user is actually the borrower and still has an outstanding balance.
   const pairTransactions = await Transaction.find({
     $and: [
       FINAL_OR_LEGACY_STATUS_FILTER,
@@ -454,7 +450,6 @@ const listTransactions = async (ownerId, filters = {}) => {
 
 const getTransactionById = async (ownerId, transactionId) => {
   ensureValidObjectId(transactionId, 'transaction identifier');
-
   const transaction = await populateTransaction(
     Transaction.findOne({
       _id: transactionId,
