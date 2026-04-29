@@ -120,17 +120,76 @@ const forgotPasswordValidator = body => {
   return createResult(value, errors);
 };
 
+const otpVerifyValidator = body => {
+  const errors = [];
+  const value = {};
+
+  addRequiredString(body, value, errors, 'email', 'Email');
+  addRequiredString(body, value, errors, 'otp', 'OTP');
+
+  if (value.email) {
+    value.email = value.email.toLowerCase();
+    validateEmail(value.email, errors);
+  }
+
+  if (value.otp && !/^[0-9]{6}$/.test(value.otp)) {
+    errors.push({
+      field: 'otp',
+      message: 'OTP must be a 6 digit code',
+    });
+  }
+
+  return createResult(value, errors);
+};
+
+const resendOtpValidator = body => {
+  const errors = [];
+  const value = {};
+
+  addRequiredString(body, value, errors, 'email', 'Email');
+
+  if (value.email) {
+    value.email = value.email.toLowerCase();
+    validateEmail(value.email, errors);
+  }
+
+  return createResult(value, errors);
+};
+
+const requestRegisterOtpValidator = registerValidator;
+
 const resetPasswordValidator = body => {
   const errors = [];
   const value = {};
 
-  addRequiredString(body, value, errors, 'token', 'Reset token');
+  addRequiredString(body, value, errors, 'email', 'Email');
 
-  const password = typeof body.password === 'string' ? body.password : '';
+  const resetToken = cleanString(body.resetToken || body.token);
+
+  if (!resetToken) {
+    errors.push({
+      field: 'resetToken',
+      message: 'Reset token is required',
+    });
+  } else {
+    value.resetToken = resetToken;
+  }
+
+  const password =
+    typeof body.newPassword === 'string'
+      ? body.newPassword
+      : typeof body.password === 'string'
+        ? body.password
+        : '';
   const confirmPassword =
     typeof body.confirmPassword === 'string' ? body.confirmPassword : undefined;
 
-  validatePassword(password, errors, 'password', 'New password');
+  if (value.email) {
+    value.email = value.email.toLowerCase();
+    validateEmail(value.email, errors);
+  }
+
+  validatePassword(password, errors, 'newPassword', 'New password');
 
   if (confirmPassword !== undefined) {
     if (!confirmPassword) {
@@ -147,7 +206,7 @@ const resetPasswordValidator = body => {
   }
 
   if (password) {
-    value.password = password;
+    value.newPassword = password;
   }
 
   return createResult(value, errors);
@@ -263,6 +322,9 @@ module.exports = {
   registerValidator,
   loginValidator,
   forgotPasswordValidator,
+  otpVerifyValidator,
+  resendOtpValidator,
+  requestRegisterOtpValidator,
   resetPasswordValidator,
   updateProfileValidator,
   changePasswordValidator,

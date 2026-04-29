@@ -2,6 +2,7 @@ module.exports = {
   authService: require('./auth.service'),
   contactService: require('./contact.service'),
   dashboardService: require('./dashboard.service'),
+  emailService: require('./email.service'),
   legalContentService: require('./legal-content.service'),
   notificationService: require('./notification.service'),
   reportsService: require('./reports.service'),

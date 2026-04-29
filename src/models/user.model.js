@@ -93,6 +93,10 @@ userSchema.pre('save', async function hashPassword(next) {
     return next();
   }
 
+  if (this.$locals?.skipPasswordHash) {
+    return next();
+  }
+
   this.password = await bcrypt.hash(this.password, 12);
   return next();
 });

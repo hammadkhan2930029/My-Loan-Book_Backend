@@ -6,8 +6,11 @@ const validate = require('../middlewares/validate.middleware');
 const {
   changePasswordValidator,
   forgotPasswordValidator,
+  otpVerifyValidator,
+  resendOtpValidator,
   loginValidator,
   registerValidator,
+  requestRegisterOtpValidator,
   resetPasswordValidator,
   updateProfileValidator,
 } = require('../validators');
@@ -15,7 +18,37 @@ const {
 const router = express.Router();
 
 router.post('/register', validate(registerValidator), authController.register);
+router.post(
+  '/register/request-otp',
+  validate(requestRegisterOtpValidator),
+  authController.requestRegisterOtp,
+);
+router.post(
+  '/register/verify-otp',
+  validate(otpVerifyValidator),
+  authController.verifyRegisterOtp,
+);
+router.post(
+  '/register/resend-otp',
+  validate(resendOtpValidator),
+  authController.resendRegisterOtp,
+);
 router.post('/login', validate(loginValidator), authController.login);
+router.post(
+  '/forgot-password/request-otp',
+  validate(forgotPasswordValidator),
+  authController.requestForgotPasswordOtp,
+);
+router.post(
+  '/forgot-password/verify-otp',
+  validate(otpVerifyValidator),
+  authController.verifyForgotPasswordOtp,
+);
+router.post(
+  '/forgot-password/resend-otp',
+  validate(resendOtpValidator),
+  authController.resendForgotPasswordOtp,
+);
 router.post(
   '/forgot-password',
   validate(forgotPasswordValidator),

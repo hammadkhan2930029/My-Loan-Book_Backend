@@ -12,6 +12,37 @@ const register = asyncHandler(async (req, res) => {
   });
 });
 
+const requestRegisterOtp = asyncHandler(async (req, res) => {
+  const result = await authService.requestRegisterOtp(req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Registration OTP sent successfully',
+    ...result,
+  });
+});
+
+const verifyRegisterOtp = asyncHandler(async (req, res) => {
+  const result = await authService.verifyRegisterOtp(req.body);
+
+  res.status(201).json({
+    success: true,
+    message: 'Registration verified successfully',
+    token: result.token,
+    user: result.user,
+  });
+});
+
+const resendRegisterOtp = asyncHandler(async (req, res) => {
+  const result = await authService.resendRegisterOtp(req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Registration OTP resent successfully',
+    ...result,
+  });
+});
+
 const login = asyncHandler(async (req, res) => {
   const result = await authService.loginUser(req.body);
 
@@ -24,14 +55,44 @@ const login = asyncHandler(async (req, res) => {
   });
 });
 
-const forgotPassword = asyncHandler(async (req, res) => {
-  const result = await authService.createPasswordResetToken(req.body.email);
+const requestForgotPasswordOtp = asyncHandler(async (req, res) => {
+  const result = await authService.requestForgotPasswordOtp(req.body);
 
   res.status(200).json({
     success: true,
-    message: 'Password reset token generated',
+    message: 'Forgot password OTP sent successfully',
+    ...result,
+  });
+});
+
+const verifyForgotPasswordOtp = asyncHandler(async (req, res) => {
+  const result = await authService.verifyForgotPasswordOtp(req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Forgot password OTP verified successfully',
     resetToken: result.resetToken,
     expiresInMinutes: result.expiresInMinutes,
+  });
+});
+
+const resendForgotPasswordOtp = asyncHandler(async (req, res) => {
+  const result = await authService.resendForgotPasswordOtp(req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Forgot password OTP resent successfully',
+    ...result,
+  });
+});
+
+const forgotPassword = asyncHandler(async (req, res) => {
+  const result = await authService.createPasswordResetToken(req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Forgot password OTP sent successfully',
+    ...result,
   });
 });
 
@@ -79,7 +140,13 @@ const changePassword = asyncHandler(async (req, res) => {
 
 module.exports = {
   register,
+  requestRegisterOtp,
+  verifyRegisterOtp,
+  resendRegisterOtp,
   login,
+  requestForgotPasswordOtp,
+  verifyForgotPasswordOtp,
+  resendForgotPasswordOtp,
   forgotPassword,
   resetPassword,
   getMe,

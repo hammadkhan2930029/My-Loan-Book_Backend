@@ -1,13 +1,18 @@
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
-const {User} = require('../models');
+const {Otp, User} = require('../models');
 const ApiError = require('../utils/apiError');
 const generateRegCode = require('../utils/generateRegCode');
-const generateResetToken = require('../utils/generateResetToken');
 const generateUserId = require('../utils/generateUserId');
 const {generateJwt} = require('./token.service');
+const {sendOtpEmail} = require('./email.service');
 
-const resetTokenExpiryMinutes = 15;
+const registerOtpExpiryMinutes = 3;
+const forgotPasswordOtpExpiryMinutes = 3;
+const resendCooldownSeconds = 60;
+const resetTokenExpiryMinutes = 10;
+const maxOtpAttempts = 5;
 
 const getPublicUser = user => ({
   id: user._id.toString(),
@@ -20,6 +25,10 @@ const getPublicUser = user => ({
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
+
+const hashValue = value => crypto.createHash('sha256').update(value).digest('hex');
+const generateOtpCode = () => String(crypto.randomInt(100000, 1000000));
+const generateResetTokenValue = () => crypto.randomBytes(32).toString('hex');
 
 const createUniqueRegCode = async () => {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -47,21 +56,274 @@ const createUniqueUserId = async () => {
   throw new ApiError('Could not generate unique 2 digit user ID', 500);
 };
 
-const registerUser = async payload => {
+const ensureEmailAndPhoneAreAvailable = async ({email, phone}) => {
   const existingUser = await User.findOne({
-    $or: [{email: payload.email}, {phone: payload.phone}],
+    $or: [{email}, {phone}],
   });
 
   if (existingUser) {
-    if (existingUser.email === payload.email) {
+    if (existingUser.email === email) {
       throw new ApiError('Email is already registered', 409);
     }
 
     throw new ApiError('Phone number is already registered', 409);
   }
+};
+
+const getLatestOtpRecord = (email, purpose) =>
+  Otp.findOne({
+    email,
+    purpose,
+  }).sort({createdAt: -1});
+
+const invalidateActiveOtps = async (email, purpose) => {
+  await Otp.updateMany(
+    {
+      email,
+      purpose,
+      isActive: true,
+    },
+    {
+      $set: {
+        isActive: false,
+        consumedAt: new Date(),
+      },
+    },
+  );
+};
+
+const createOtpRecord = async ({email, purpose, pendingData = null, expiryMinutes}) => {
+  const latestRecord = await getLatestOtpRecord(email, purpose);
+  const now = new Date();
+
+  if (latestRecord?.isActive && latestRecord.resendAvailableAt > now) {
+    const secondsRemaining = Math.max(
+      1,
+      Math.ceil((latestRecord.resendAvailableAt.getTime() - now.getTime()) / 1000),
+    );
+    throw new ApiError(
+      `Please wait ${secondsRemaining} seconds before requesting another code`,
+      429,
+    );
+  }
+
+  await invalidateActiveOtps(email, purpose);
+
+  const otpCode = generateOtpCode();
+  const otpRecord = await Otp.create({
+    email,
+    purpose,
+    codeHash: hashValue(otpCode),
+    expiresAt: new Date(now.getTime() + expiryMinutes * 60 * 1000),
+    resendAvailableAt: new Date(now.getTime() + resendCooldownSeconds * 1000),
+    attemptCount: 0,
+    isActive: true,
+    pendingData,
+  });
+
+  await sendOtpEmail(email, otpCode, purpose);
+
+  return {
+    email: otpRecord.email,
+    expiresInMinutes: expiryMinutes,
+    resendAvailableInSeconds: resendCooldownSeconds,
+  };
+};
+
+const validateLatestOtp = async ({email, purpose, otp}) => {
+  const otpRecord = await getLatestOtpRecord(email, purpose);
+  const now = new Date();
+
+  if (!otpRecord || !otpRecord.isActive) {
+    throw new ApiError('No active OTP found for this email', 404);
+  }
+
+  if (otpRecord.expiresAt <= now) {
+    otpRecord.isActive = false;
+    otpRecord.consumedAt = now;
+    await otpRecord.save({validateBeforeSave: false});
+    throw new ApiError('OTP has expired. Please request a new code', 400);
+  }
+
+  if (otpRecord.attemptCount >= maxOtpAttempts) {
+    otpRecord.isActive = false;
+    otpRecord.consumedAt = now;
+    await otpRecord.save({validateBeforeSave: false});
+    throw new ApiError('Maximum OTP attempts exceeded. Please request a new code', 429);
+  }
+
+  if (otpRecord.codeHash !== hashValue(otp)) {
+    otpRecord.attemptCount += 1;
+
+    if (otpRecord.attemptCount >= maxOtpAttempts) {
+      otpRecord.isActive = false;
+      otpRecord.consumedAt = now;
+    }
+
+    await otpRecord.save({validateBeforeSave: false});
+
+    throw new ApiError('Invalid OTP code', 400);
+  }
+
+  return otpRecord;
+};
+
+const createUserFromPendingData = async pendingData => {
+  const user = new User({
+    fullName: pendingData.fullName,
+    email: pendingData.email,
+    phone: pendingData.phone,
+    password: pendingData.passwordHash,
+    userId: await createUniqueUserId(),
+    reg_code: await createUniqueRegCode(),
+  });
+
+  user.$locals.skipPasswordHash = true;
+  await user.save();
+
+  return user;
+};
+
+const requestRegisterOtp = async payload => {
+  const email = payload.email.toLowerCase();
+  await ensureEmailAndPhoneAreAvailable({email, phone: payload.phone});
+
+  const passwordHash = await bcrypt.hash(payload.password, 12);
+
+  return createOtpRecord({
+    email,
+    purpose: 'register',
+    expiryMinutes: registerOtpExpiryMinutes,
+    pendingData: {
+      fullName: payload.fullName,
+      email,
+      phone: payload.phone,
+      passwordHash,
+    },
+  });
+};
+
+const verifyRegisterOtp = async ({email, otp}) => {
+  const normalizedEmail = email.toLowerCase();
+  const otpRecord = await validateLatestOtp({
+    email: normalizedEmail,
+    purpose: 'register',
+    otp,
+  });
+
+  if (!otpRecord.pendingData) {
+    throw new ApiError('Registration data is missing for this OTP session', 400);
+  }
+
+  await ensureEmailAndPhoneAreAvailable({
+    email: otpRecord.pendingData.email,
+    phone: otpRecord.pendingData.phone,
+  });
+
+  const user = await createUserFromPendingData(otpRecord.pendingData);
+  const token = generateJwt(user._id);
+
+  otpRecord.verifiedAt = new Date();
+  otpRecord.consumedAt = new Date();
+  otpRecord.isActive = false;
+  await otpRecord.save({validateBeforeSave: false});
+
+  return {
+    token,
+    user: getPublicUser(user),
+  };
+};
+
+const resendRegisterOtp = async ({email}) => {
+  const normalizedEmail = email.toLowerCase();
+  const latestRecord = await getLatestOtpRecord(normalizedEmail, 'register');
+
+  if (!latestRecord?.pendingData) {
+    throw new ApiError('No pending registration found for this email', 404);
+  }
+
+  await ensureEmailAndPhoneAreAvailable({
+    email: latestRecord.pendingData.email,
+    phone: latestRecord.pendingData.phone,
+  });
+
+  return createOtpRecord({
+    email: normalizedEmail,
+    purpose: 'register',
+    expiryMinutes: registerOtpExpiryMinutes,
+    pendingData: latestRecord.pendingData,
+  });
+};
+
+const requestForgotPasswordOtp = async ({email}) => {
+  const normalizedEmail = email.toLowerCase();
+  const user = await User.findOne({email: normalizedEmail});
+
+  if (!user) {
+    throw new ApiError('No user found with this email', 404);
+  }
+
+  return createOtpRecord({
+    email: normalizedEmail,
+    purpose: 'forgot_password',
+    expiryMinutes: forgotPasswordOtpExpiryMinutes,
+    pendingData: {
+      userId: user._id.toString(),
+    },
+  });
+};
+
+const verifyForgotPasswordOtp = async ({email, otp}) => {
+  const normalizedEmail = email.toLowerCase();
+  const otpRecord = await validateLatestOtp({
+    email: normalizedEmail,
+    purpose: 'forgot_password',
+    otp,
+  });
+
+  const resetToken = generateResetTokenValue();
+
+  otpRecord.verifiedAt = new Date();
+  otpRecord.isActive = false;
+  otpRecord.resetTokenHash = hashValue(resetToken);
+  otpRecord.resetTokenExpiresAt = new Date(
+    Date.now() + resetTokenExpiryMinutes * 60 * 1000,
+  );
+  await otpRecord.save({validateBeforeSave: false});
+
+  return {
+    resetToken,
+    expiresInMinutes: resetTokenExpiryMinutes,
+  };
+};
+
+const resendForgotPasswordOtp = async ({email}) => {
+  const normalizedEmail = email.toLowerCase();
+  const user = await User.findOne({email: normalizedEmail}).select('_id');
+
+  if (!user) {
+    throw new ApiError('No user found with this email', 404);
+  }
+
+  return createOtpRecord({
+    email: normalizedEmail,
+    purpose: 'forgot_password',
+    expiryMinutes: forgotPasswordOtpExpiryMinutes,
+    pendingData: {
+      userId: user._id.toString(),
+    },
+  });
+};
+
+const registerUser = async payload => {
+  await ensureEmailAndPhoneAreAvailable({
+    email: payload.email.toLowerCase(),
+    phone: payload.phone,
+  });
 
   const user = await User.create({
     ...payload,
+    email: payload.email.toLowerCase(),
     userId: await createUniqueUserId(),
     reg_code: await createUniqueRegCode(),
   });
@@ -95,47 +357,46 @@ const loginUser = async ({phone, password}) => {
   };
 };
 
-const createPasswordResetToken = async email => {
-  const user = await User.findOne({email}).select(
-    '+resetPasswordToken +resetPasswordExpires',
+const createPasswordResetToken = async payload =>
+  requestForgotPasswordOtp(
+    typeof payload === 'string'
+      ? {
+          email: payload,
+        }
+      : payload,
   );
 
-  if (!user) {
-    throw new ApiError('No user found with this email', 404);
-  }
+const resetPassword = async ({email, resetToken, token, newPassword, password}) => {
+  const normalizedEmail = email.toLowerCase();
+  const providedResetToken = resetToken || token;
+  const nextPassword = newPassword || password;
 
-  const {resetToken, hashedToken} = generateResetToken();
+  const otpRecord = await Otp.findOne({
+    email: normalizedEmail,
+    purpose: 'forgot_password',
+    resetTokenHash: hashValue(providedResetToken),
+    resetTokenExpiresAt: {$gt: new Date()},
+    verifiedAt: {$ne: null},
+    consumedAt: null,
+  }).sort({createdAt: -1});
 
-  user.resetPasswordToken = hashedToken;
-  user.resetPasswordExpires = new Date(
-    Date.now() + resetTokenExpiryMinutes * 60 * 1000,
-  );
-
-  await user.save({validateBeforeSave: false});
-
-  return {
-    resetToken,
-    expiresInMinutes: resetTokenExpiryMinutes,
-  };
-};
-
-const resetPassword = async ({token, password}) => {
-  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-  const user = await User.findOne({
-    resetPasswordToken: hashedToken,
-    resetPasswordExpires: {$gt: new Date()},
-  }).select('+password +resetPasswordToken +resetPasswordExpires');
-
-  if (!user) {
+  if (!otpRecord) {
     throw new ApiError('Reset token is invalid or has expired', 400);
   }
 
-  user.password = password;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpires = undefined;
+  const user = await User.findOne({email: normalizedEmail}).select('+password');
 
+  if (!user) {
+    throw new ApiError('User not found', 404);
+  }
+
+  user.password = nextPassword;
   await user.save({validateModifiedOnly: true});
+
+  otpRecord.consumedAt = new Date();
+  otpRecord.resetTokenHash = null;
+  otpRecord.resetTokenExpiresAt = null;
+  await otpRecord.save({validateBeforeSave: false});
 
   const authToken = generateJwt(user._id);
 
@@ -215,13 +476,20 @@ const changeCurrentUserPassword = async (userId, {currentPassword, password}) =>
 };
 
 module.exports = {
-  registerUser,
-  loginUser,
-  generateJwt,
-  createUniqueUserId,
-  createPasswordResetToken,
-  resetPassword,
-  getCurrentUser,
-  updateCurrentUser,
   changeCurrentUserPassword,
+  createPasswordResetToken,
+  createUniqueRegCode,
+  createUniqueUserId,
+  generateJwt,
+  getCurrentUser,
+  loginUser,
+  registerUser,
+  requestForgotPasswordOtp,
+  requestRegisterOtp,
+  resendForgotPasswordOtp,
+  resendRegisterOtp,
+  resetPassword,
+  updateCurrentUser,
+  verifyForgotPasswordOtp,
+  verifyRegisterOtp,
 };
