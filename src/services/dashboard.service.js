@@ -70,6 +70,10 @@ const getRecentActivityItem = transaction => ({
       ? transaction.status === 'pending'
         ? 'requested repayment of'
         : 'repaid'
+      : transaction.status === 'pending'
+        ? transaction.type === 'gave'
+          ? 'assigned a loan pending confirmation of'
+          : 'received a loan request for'
       : transaction.type === 'gave'
         ? 'borrowed from you'
         : 'gave you back',
@@ -79,6 +83,8 @@ const getRecentActivityItem = transaction => ({
       ? transaction.status === 'pending'
         ? 'Pending'
         : 'Repaid'
+      : transaction.status === 'pending'
+        ? 'Pending'
       : transaction.type === 'gave'
         ? 'Given'
         : 'Taken',
@@ -87,6 +93,8 @@ const getRecentActivityItem = transaction => ({
       ? transaction.status === 'pending'
         ? 'taken'
         : 'receive'
+      : transaction.status === 'pending'
+        ? 'taken'
       : transaction.type === 'gave'
         ? 'given'
         : 'receive',
@@ -102,13 +110,14 @@ const getDashboardData = async ownerId => {
   const pendingApprovals = transactions
     .filter(
       transaction =>
-        transaction.category === 'repayment' &&
         transaction.status === 'pending' &&
-        transaction.type === 'took',
+        transaction.viewerRole === 'counterparty' &&
+        ['loan', 'repayment'].includes(transaction.category),
     )
     .slice(0, 5)
     .map(transaction => ({
       amount: formatCurrencyValue(transaction.amount, transaction.currency),
+      category: transaction.category,
       contactId: transaction.contactId,
       counterpartyName: transaction.counterpartyName,
       currency: transaction.currency,

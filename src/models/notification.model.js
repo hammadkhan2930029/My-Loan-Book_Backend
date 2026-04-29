@@ -42,6 +42,9 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Notification type is required'],
       enum: [
+        'loan_assigned',
+        'loan_confirmed',
+        'loan_rejected',
         'payment_submitted',
         'payment_confirmed',
         'payment_rejected',

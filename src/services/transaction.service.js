@@ -221,6 +221,10 @@ const buildViewerPairSummary = async ({viewerId, counterpartyUserId}) => {
 
 const createTransaction = async (ownerId, payload) => {
   const contact = await ensureOwnedContact(ownerId, payload.contactId);
+  const category = payload.category || 'loan';
+  const isLoanRequest = category === 'loan';
+  const status = payload.status || (isLoanRequest ? 'pending' : 'approved');
+  const approvedAt = status === 'pending' ? null : new Date();
 
   const transaction = await Transaction.create({
     owner: ownerId,
@@ -229,10 +233,10 @@ const createTransaction = async (ownerId, payload) => {
     type: payload.type,
     amount: payload.amount,
     currency: payload.currency || 'PKR',
-    category: payload.category || 'loan',
-    status: payload.status || 'approved',
+    category,
+    status,
     parentTransaction: payload.parentTransaction || null,
-    approvedAt: payload.status === 'pending' ? null : new Date(),
+    approvedAt,
     transactionDate: payload.transactionDate || new Date(),
     dueDate: payload.dueDate || null,
     monthlyPaymentDay: payload.monthlyPaymentDay || null,
@@ -248,6 +252,29 @@ const createTransaction = async (ownerId, payload) => {
     path: 'owner',
     select: 'fullName profilePhoto',
   });
+
+  if (isLoanRequest && status === 'pending') {
+    const loanMessage =
+      payload.type === 'took'
+        ? `${transaction.owner.fullName} recorded borrowing ${formatCurrencyValue(
+            transaction.amount,
+            transaction.currency,
+          )} from you. Please confirm this loan to add it to both ledgers.`
+        : `${transaction.owner.fullName} assigned you a loan of ${formatCurrencyValue(
+            transaction.amount,
+            transaction.currency,
+          )}. Please confirm it to add it to your ledger.`;
+
+    await notificationService.createNotification({
+      userId: contact.contactUser,
+      senderId: ownerId,
+      loanId: transaction._id,
+      transactionId: transaction._id,
+      title: 'Loan assigned',
+      message: loanMessage,
+      type: 'loan_assigned',
+    });
+  }
 
   return getPublicTransaction(transaction, ownerId);
 };
@@ -365,6 +392,92 @@ const confirmRepaymentRequest = async (ownerId, transactionId) => {
   return getPublicTransaction(transaction, ownerId);
 };
 
+const confirmLoanRequest = async (ownerId, transactionId) => {
+  const transaction = await ensureTransactionParticipant(ownerId, transactionId);
+
+  if ((transaction.category || 'loan') !== 'loan') {
+    throw new ApiError('Only loan transactions can be confirmed here', 400);
+  }
+
+  if (transaction.status !== 'pending') {
+    throw new ApiError('Loan transaction has already been processed', 400);
+  }
+
+  if (getIdString(transaction.contactUser) !== ownerId.toString()) {
+    throw new ApiError('Only the other participant can confirm this loan transaction', 403);
+  }
+
+  transaction.status = 'confirmed';
+  transaction.approvedAt = new Date();
+  await transaction.save();
+  await transaction.populate({
+    path: 'contactUser',
+    select: 'fullName profilePhoto',
+  });
+  await transaction.populate({
+    path: 'owner',
+    select: 'fullName profilePhoto',
+  });
+
+  await notificationService.createNotification({
+    userId: transaction.owner._id,
+    senderId: ownerId,
+    loanId: transaction._id,
+    transactionId: transaction._id,
+    title: 'Loan confirmed',
+    message: `${transaction.contactUser.fullName} confirmed the loan of ${formatCurrencyValue(
+      transaction.amount,
+      transaction.currency,
+    )}. It is now added to both ledgers.`,
+    type: 'loan_confirmed',
+  });
+
+  return getPublicTransaction(transaction, ownerId);
+};
+
+const rejectLoanRequest = async (ownerId, transactionId) => {
+  const transaction = await ensureTransactionParticipant(ownerId, transactionId);
+
+  if ((transaction.category || 'loan') !== 'loan') {
+    throw new ApiError('Only loan transactions can be rejected here', 400);
+  }
+
+  if (transaction.status !== 'pending') {
+    throw new ApiError('Loan transaction has already been processed', 400);
+  }
+
+  if (getIdString(transaction.contactUser) !== ownerId.toString()) {
+    throw new ApiError('Only the other participant can reject this loan transaction', 403);
+  }
+
+  transaction.status = 'rejected';
+  transaction.approvedAt = null;
+  await transaction.save();
+  await transaction.populate({
+    path: 'contactUser',
+    select: 'fullName profilePhoto',
+  });
+  await transaction.populate({
+    path: 'owner',
+    select: 'fullName profilePhoto',
+  });
+
+  await notificationService.createNotification({
+    userId: transaction.owner._id,
+    senderId: ownerId,
+    loanId: transaction._id,
+    transactionId: transaction._id,
+    title: 'Loan rejected',
+    message: `${transaction.contactUser.fullName} rejected the loan of ${formatCurrencyValue(
+      transaction.amount,
+      transaction.currency,
+    )}. It was not added to the ledger.`,
+    type: 'loan_rejected',
+  });
+
+  return getPublicTransaction(transaction, ownerId);
+};
+
 const rejectRepaymentRequest = async (ownerId, transactionId) => {
   const transaction = await ensureTransactionParticipant(ownerId, transactionId);
 
@@ -466,10 +579,12 @@ const getTransactionById = async (ownerId, transactionId) => {
 
 module.exports = {
   approveRepaymentRequest,
+  confirmLoanRequest,
   confirmRepaymentRequest,
   createRepaymentRequest,
   createTransaction,
   getTransactionById,
   listTransactions,
+  rejectLoanRequest,
   rejectRepaymentRequest,
 };

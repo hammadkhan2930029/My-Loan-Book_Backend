@@ -22,6 +22,8 @@ router.post(
   validate(createRepaymentRequestValidator),
   transactionController.createRepaymentRequest,
 );
+router.patch('/:id/confirm-loan', transactionController.confirmLoanRequest);
+router.patch('/:id/reject-loan', transactionController.rejectLoanRequest);
 router.patch('/:id/confirm', transactionController.confirmRepaymentRequest);
 router.patch('/:id/reject', transactionController.rejectRepaymentRequest);
 router.patch('/:id/approve-repayment', transactionController.approveRepaymentRequest);
