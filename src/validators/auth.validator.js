@@ -1,5 +1,5 @@
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const phonePattern = /^\+?[0-9\s\-()]{10,20}$/;
+const internationalPhonePattern = /^\+[1-9][0-9]{7,14}$/;
 const minPasswordLength = 8;
 const profilePhotoPattern = /^(https?:\/\/\S+|data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+)$/;
 
@@ -50,6 +50,22 @@ const validatePassword = (password, errors, field = 'password', label = 'Passwor
   }
 };
 
+const normalizePhone = value => String(value || '').replace(/[^\d+]/g, '');
+
+const validatePhone = (phone, errors, field = 'phone') => {
+  const normalizedPhone = normalizePhone(phone);
+
+  if (!internationalPhonePattern.test(normalizedPhone)) {
+    errors.push({
+      field,
+      message: 'Enter a valid phone number with country code',
+    });
+    return '';
+  }
+
+  return normalizedPhone;
+};
+
 const registerValidator = body => {
   const errors = [];
   const value = {};
@@ -66,11 +82,8 @@ const registerValidator = body => {
     validateEmail(value.email, errors);
   }
 
-  if (value.phone && !phonePattern.test(value.phone)) {
-    errors.push({
-      field: 'phone',
-      message: 'Enter a valid phone number',
-    });
+  if (value.phone) {
+    value.phone = validatePhone(value.phone, errors);
   }
 
   if (password) {
@@ -96,11 +109,8 @@ const loginValidator = body => {
     value.password = password;
   }
 
-  if (value.phone && !phonePattern.test(value.phone)) {
-    errors.push({
-      field: 'phone',
-      message: 'Enter a valid phone number',
-    });
+  if (value.phone) {
+    value.phone = validatePhone(value.phone, errors);
   }
 
   return createResult(value, errors);
@@ -241,11 +251,8 @@ const updateProfileValidator = body => {
     validateEmail(value.email, errors);
   }
 
-  if (value.phone && !phonePattern.test(value.phone)) {
-    errors.push({
-      field: 'phone',
-      message: 'Enter a valid phone number',
-    });
+  if (value.phone) {
+    value.phone = validatePhone(value.phone, errors);
   }
 
   const profilePhoto = cleanString(body.profilePhoto);

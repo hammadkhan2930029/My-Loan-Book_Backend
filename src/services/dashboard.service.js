@@ -3,11 +3,11 @@ const transactionService = require('./transaction.service');
 
 const formatCurrencyValue = (amount, currency = 'PKR') => {
   try {
-    return new Intl.NumberFormat('en-PK', {
-      style: 'currency',
-      currency,
+    const formattedNumber = new Intl.NumberFormat('en-US', {
       maximumFractionDigits: 0,
     }).format(Number(amount) || 0);
+
+    return `${currency} ${formattedNumber}`;
   } catch {
     return `${currency} ${Number(amount) || 0}`;
   }

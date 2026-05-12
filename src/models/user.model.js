@@ -1,6 +1,8 @@
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 
+const internationalPhonePattern = /^\+[1-9][0-9]{7,14}$/;
+
 const userSchema = new mongoose.Schema(
   {
     fullName: {
@@ -23,7 +25,7 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Phone number is required'],
       unique: true,
       trim: true,
-      match: [/^\+?[0-9\s\-()]{10,20}$/, 'Enter a valid phone number'],
+      match: [internationalPhonePattern, 'Enter a valid phone number with country code'],
     },
     password: {
       type: String,
